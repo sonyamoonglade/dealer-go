@@ -1,4 +1,4 @@
-module github.com/sonyamoonglade/dealer
+module github.com/sonyamoonglade/dealer-go
 
 go 1.18
 
