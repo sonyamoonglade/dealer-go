@@ -59,7 +59,7 @@ func (d *Dealer) deal() {
 		d.Acquire()
 		d.wg.Add(1)
 		go func(j *Job) {
-			j.errch <- j.F()
+			j.resultch <- j.F()
 			d.logger.Debugf("job %d is complete", j.ID)
 			defer func() {
 				d.wg.Done()

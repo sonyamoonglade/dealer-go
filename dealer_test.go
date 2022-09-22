@@ -1,6 +1,7 @@
 package dealer
 
 import (
+	"bytes"
 	"errors"
 	"sync"
 	"testing"
@@ -28,17 +29,17 @@ func TestCanExecuteOneJobSync(t *testing.T) {
 	d := New(logger.Sugar(), maxWorkers)
 	d.Start(true)
 
-	f := func() error {
+	f := func() *JobResult {
 		for i := 0; i < 50; i++ {
 		}
-		return nil
+		return NewJobResult(nil, nil)
 	}
 
 	j := NewJob(f)
 	for i := 0; i < 50; i++ {
 		d.AddJob(j)
-		err := j.ReadErr()
-		require.NoError(t, err)
+		res := j.WaitResult()
+		require.NoError(t, res.Err)
 	}
 
 	d.Stop()
@@ -50,10 +51,10 @@ func TestCanExecuteOneJobAsync(t *testing.T) {
 	d := New(logger.Sugar(), maxWorkers)
 	d.Start(true)
 
-	f := func() error {
+	f := func() *JobResult {
 		for i := 0; i < 50; i++ {
 		}
-		return nil
+		return NewJobResult(nil, nil)
 	}
 
 	j := NewJob(f)
@@ -64,9 +65,9 @@ func TestCanExecuteOneJobAsync(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			d.AddJob(j)
-			err := j.ReadErr()
+			res := j.WaitResult()
 			wg.Done() //important order
-			require.NoError(t, err)
+			require.NoError(t, res.Err)
 		}()
 	}
 
@@ -95,15 +96,16 @@ func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
 	for i := 0; i < jobCount; i++ {
 		wg.Add(1)
 		go func() {
-			f := func() error {
+			f := func() *JobResult {
 				time.Sleep(time.Millisecond * 200)
-				return errors.New("err")
+				err := errors.New("err")
+				return NewJobResult(nil, err)
 			}
 			j := NewJob(f)
 			d.AddJob(j)
-			err := j.ReadErr()
+			res := j.WaitResult()
 			wg.Done()
-			require.Error(t, err)
+			require.Error(t, res.Err)
 		}()
 	}
 	wg.Wait()
@@ -113,4 +115,29 @@ func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
 	t.Logf("%.4f; %.4f", limit, elapsed)
 	require.Less(t, elapsed, limit)
 
+}
+func TestCanExecuteJobsAndReceiveOutput(t *testing.T) {
+
+	logger, _ := zap.NewProduction()
+
+	d := New(logger.Sugar(), maxWorkers)
+	d.Start(true)
+
+	for i := 0; i < 50; i++ {
+		j := NewJob(func() *JobResult {
+			buff := bytes.NewBuffer(nil)
+			buff.WriteString("Hello world!")
+			buff.WriteString("Hello world!")
+			return NewJobResult(buff, nil)
+		})
+		d.AddJob(j)
+
+		result := j.WaitResult()
+
+		str := result.Out.(*bytes.Buffer).String()
+		require.Equal(t, "Hello world!Hello world!", str)
+		require.NoError(t, result.Err)
+	}
+
+	d.Stop()
 }
