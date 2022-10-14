@@ -1,6 +1,8 @@
 package dealer
 
-import "time"
+import (
+	"time"
+)
 
 type JobResult struct {
 	Out interface{}
@@ -24,7 +26,7 @@ type Job struct {
 
 func NewJob(f JobFunc) *Job {
 	return &Job{
-		ID:       time.Now().Unix(),
+		ID:       time.Now().UnixNano(),
 		F:        f,
 		resultch: make(chan *JobResult),
 	}
