@@ -23,31 +23,31 @@ func TestCanStartStop(t *testing.T) {
 
 }
 
-// func TestCanExecuteJobsWithWorkerPool(t *testing.T) {
+func TestCanExecuteJobsWithWorkerPool(t *testing.T) {
 
-// 	logger, _ := zap.NewProduction()
-// 	d := New(logger.Sugar(), maxWorkers)
-// 	d.WithStrategy(WorkerPool)
+	logger, _ := zap.NewProduction()
+	d := New(logger.Sugar(), maxWorkers)
+	d.WithStrategy(WorkerPool)
 
-// 	d.Start(true)
+	d.Start(true)
 
-// 	f := func() *JobResult {
-// 		for i := 0; i < 50; i++ {
-// 		}
-// 		return NewJobResult(nil, nil)
-// 	}
+	f := func() *JobResult {
+		for i := 0; i < 50; i++ {
+		}
+		return NewJobResult(nil, nil)
+	}
 
-// 	j := NewJob(f)
-// 	for i := 0; i < 50; i++ {
-// 		d.AddJob(j)
-// 		res := j.WaitResult()
-// 		require.NoError(t, res.Err)
-// 		require.Nil(t, res.Out)
-// 	}
+	j := NewJob(f)
+	for i := 0; i < 50; i++ {
+		d.AddJob(j)
+		res := j.WaitResult()
+		require.NoError(t, res.Err)
+		require.Nil(t, res.Out)
+	}
 
-// 	d.Stop()
+	d.Stop()
 
-// }
+}
 
 func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 
@@ -73,15 +73,16 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 
 	startSemaphore := time.Now()
 	j := NewJob(f)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
+
 		d.AddJob(j)
 		res := j.WaitResult()
 		require.NoError(t, res.Err)
 		require.Nil(t, res.Out)
 	}
 
-	d.Stop()
 	elapsedSemaphore := time.Now().Sub(startSemaphore).Microseconds()
+	d.Stop()
 
 	// ------------------------------
 
@@ -100,16 +101,16 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 
 	startPool := time.Now()
 	j2 := NewJob(f2)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10000; i++ {
 		d2.AddJob(j2)
 		res := j2.WaitResult()
 		require.NoError(t, res.Err)
 		require.Nil(t, res.Out)
 
 	}
+	elapsedPool := time.Now().Sub(startPool).Microseconds()
 
 	d2.Stop()
-	elapsedPool := time.Now().Sub(startPool).Microseconds()
 
 	//This test shows 3x-5x more perfomance with workers
 	//See explanation at the top of the test
