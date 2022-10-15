@@ -2,11 +2,11 @@ package dealer
 
 import (
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
 
-//Default Strategy is Semaphore
 type Strategy int
 
 const (
@@ -14,16 +14,14 @@ const (
 	WorkerPool
 )
 
-var started bool
-
 type Dealer struct {
 	sem        chan struct{}
 	shutdown   chan interface{}
 	jobq       chan *Job
 	logger     *zap.SugaredLogger
 	wg         *sync.WaitGroup
-	strategy   Strategy
 	maxWorkers int
+	strategy   Strategy
 }
 
 func New(logger *zap.SugaredLogger, maxWorkers int) *Dealer {
@@ -37,64 +35,54 @@ func New(logger *zap.SugaredLogger, maxWorkers int) *Dealer {
 	}
 }
 
-//Sets strategy to a dealer instance
 func (d *Dealer) WithStrategy(strategy Strategy) {
-	d.strategy = strategy
+	d.logger.Debugf("")
 }
 
-func (d *Dealer) Start(debug bool) {
-	started = true
-	switch d.strategy {
-	case Semaphore:
-		go d.startWithSemaphore()
-		d.logger.Debugf("dealing has started with semaphore")
-	case WorkerPool:
-		go d.startWorkerPool()
-		d.logger.Debugf("dealing has started with workerPool")
-	}
-
+func (d *Dealer) acquire() {
+	d.sem <- struct{}{}
 }
 
-func (d *Dealer) Stop() {
-	started = false
-	//If worker pool is selected, should close jobq first, to stop all workers
-	switch d.strategy {
-	case Semaphore:
-		d.wg.Wait()
-		close(d.jobq)
-		close(d.shutdown)
-	case WorkerPool:
-		close(d.jobq)
-		d.wg.Wait()
-		close(d.shutdown)
-	}
-}
-
-//Adds job to job queue
-func (d *Dealer) AddJob(j *Job) {
-	if !started {
-		panic("dealer has not started yet!")
-	}
-
-	d.jobq <- j
-}
-
-func (d *Dealer) startWorkerPool() {
-	for n := 1; n <= d.maxWorkers; n++ {
-		d.wg.Add(1)
-		go d.startWorker(n)
-	}
+func (d *Dealer) release() {
+	<-d.sem
 }
 
 func (d *Dealer) startWorker(n int) {
 	d.logger.Debugf("worker %d is up\n", n)
 	for j := range d.jobq {
-		j.resultch <- j.F()
+		d.wg.Add(1)
+		go func(j *Job) {
+			j.resultch <- j.F()
+			d.logger.Debugf("job %d is complete by worker: %d", j.ID, n)
+			defer func() {
+				d.wg.Done()
+			}()
+		}(j)
 	}
-	defer d.wg.Done()
 }
 
-func (d *Dealer) startWithSemaphore() {
+func (d *Dealer) Start(debug bool) {
+
+	go d.deal()
+	d.logger.Debugf("started dealing")
+
+	if debug {
+		go d.debug()
+	}
+
+}
+
+func (d *Dealer) Stop() {
+	d.wg.Wait()
+	close(d.jobq)
+	close(d.shutdown)
+}
+
+func (d *Dealer) AddJob(j *Job) {
+	d.jobq <- j
+}
+
+func (d *Dealer) deal() {
 	for j := range d.jobq {
 		d.acquire()
 		d.wg.Add(1)
@@ -109,10 +97,15 @@ func (d *Dealer) startWithSemaphore() {
 	}
 }
 
-func (d *Dealer) acquire() {
-	d.sem <- struct{}{}
-}
-
-func (d *Dealer) release() {
-	<-d.sem
+func (d *Dealer) debug() {
+	t := time.NewTicker(time.Second * 5)
+	for {
+		select {
+		case <-d.shutdown:
+			t.Stop()
+			return
+		case <-t.C:
+			d.logger.Debugf("jobs in queue: %d", len(d.jobq))
+		}
+	}
 }
