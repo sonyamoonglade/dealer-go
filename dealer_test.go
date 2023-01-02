@@ -24,6 +24,7 @@ func TestCanStartStop(t *testing.T) {
 }
 
 func TestCanExecuteJobsWithWorkerPool(t *testing.T) {
+	t.Parallel()
 
 	logger, _ := zap.NewProduction()
 	d := New(logger.Sugar(), maxWorkers)
@@ -37,10 +38,10 @@ func TestCanExecuteJobsWithWorkerPool(t *testing.T) {
 		return NewJobResult(nil, nil)
 	}
 
-	j := NewJob(f)
 	for i := 0; i < 50; i++ {
-		d.AddJob(j)
-		res := j.WaitResult()
+		j := newJob(f)
+		d.addJob(j)
+		res := j.Wait()
 		require.NoError(t, res.Err)
 		require.Nil(t, res.Out)
 	}
@@ -50,8 +51,8 @@ func TestCanExecuteJobsWithWorkerPool(t *testing.T) {
 }
 
 func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
-
-	logger, _ := zap.NewProduction()
+	t.Parallel()
+	logger := zap.NewNop()
 
 	//Semaphore pattern means for each job one goroutine will be created
 	//thus, giving a lot of overhead if jobs are constantly being added.
@@ -59,7 +60,7 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 	//In this example, workerPool should win in time, because only once
 	//100 workers will be created
 	//Semaphore in a long run might cause big GC pauses and sheduling overall.
-	localMaxWorkers := 200
+	localMaxWorkers := 100
 	d := New(logger.Sugar(), localMaxWorkers)
 	d.WithStrategy(Semaphore)
 
@@ -72,11 +73,11 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 	}
 
 	startSemaphore := time.Now()
-	j := NewJob(f)
 	for i := 0; i < 10000; i++ {
 
-		d.AddJob(j)
-		res := j.WaitResult()
+		j := newJob(f)
+		d.addJob(j)
+		res := j.Wait()
 		require.NoError(t, res.Err)
 		require.Nil(t, res.Out)
 	}
@@ -100,10 +101,10 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 	}
 
 	startPool := time.Now()
-	j2 := NewJob(f2)
 	for i := 0; i < 10000; i++ {
-		d2.AddJob(j2)
-		res := j2.WaitResult()
+		j2 := newJob(f2)
+		d2.addJob(j2)
+		res := j2.Wait()
 		require.NoError(t, res.Err)
 		require.Nil(t, res.Out)
 
@@ -119,8 +120,8 @@ func TestWorkerPoolIsFasterThanSemaphore(t *testing.T) {
 }
 
 func TestCanExecuteOneJobSync(t *testing.T) {
-
-	logger, _ := zap.NewProduction()
+	t.Parallel()
+	logger := zap.NewNop()
 
 	d := New(logger.Sugar(), maxWorkers)
 	d.Start(true)
@@ -131,18 +132,18 @@ func TestCanExecuteOneJobSync(t *testing.T) {
 		return NewJobResult(nil, nil)
 	}
 
-	j := NewJob(f)
 	for i := 0; i < 50; i++ {
-		d.AddJob(j)
-		res := j.WaitResult()
+		j := newJob(f)
+		d.addJob(j)
+		res := j.Wait()
 		require.NoError(t, res.Err)
 	}
 
 	d.Stop()
 }
 func TestCanExecuteOneJobAsync(t *testing.T) {
-
-	logger, _ := zap.NewProduction()
+	t.Parallel()
+	logger := zap.NewNop()
 
 	d := New(logger.Sugar(), maxWorkers)
 	d.Start(true)
@@ -153,15 +154,15 @@ func TestCanExecuteOneJobAsync(t *testing.T) {
 		return NewJobResult(nil, nil)
 	}
 
-	j := NewJob(f)
 	wg := new(sync.WaitGroup)
 
 	for i := 0; i < 50; i++ {
 		//async
 		wg.Add(1)
 		go func() {
-			d.AddJob(j)
-			res := j.WaitResult()
+			j := newJob(f)
+			d.addJob(j)
+			res := j.Wait()
 			wg.Done() //important order
 			require.NoError(t, res.Err)
 		}()
@@ -171,8 +172,9 @@ func TestCanExecuteOneJobAsync(t *testing.T) {
 	d.Stop()
 }
 func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
+	t.Parallel()
 
-	logger, _ := zap.NewProduction()
+	logger := zap.NewNop()
 
 	d := New(logger.Sugar(), maxWorkers)
 	jobCount := 50
@@ -183,7 +185,7 @@ func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
 	//Resulting totally in (50 * 202ms) / (maxWorkers * 1000ms) = 2.02 seconds
 	//The success will be if:
 	// - limit(2.02seconds) - actualExecutionTime > 0
-	limit := float64(200) * float64(jobCount) * 1.01 / float64(maxWorkers*1000)
+	limit := (float64(200) * float64(jobCount) * 1.01) / float64(maxWorkers*1000)
 
 	d.Start(true)
 
@@ -197,9 +199,9 @@ func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
 				err := errors.New("err")
 				return NewJobResult(nil, err)
 			}
-			j := NewJob(f)
-			d.AddJob(j)
-			res := j.WaitResult()
+			j := newJob(f)
+			d.addJob(j)
+			res := j.Wait()
 			wg.Done()
 			require.Error(t, res.Err)
 		}()
@@ -213,22 +215,23 @@ func TestCanExecuteLongJobsAndReadErrorsAsync(t *testing.T) {
 
 }
 func TestCanExecuteJobsAndReceiveOutput(t *testing.T) {
+	t.Parallel()
 
-	logger, _ := zap.NewProduction()
+	logger := zap.NewNop()
 
 	d := New(logger.Sugar(), maxWorkers)
 	d.Start(true)
 
 	for i := 0; i < 50; i++ {
-		j := NewJob(func() *JobResult {
+		j := newJob(func() *JobResult {
 			buff := bytes.NewBuffer(nil)
 			buff.WriteString("Hello world!")
 			buff.WriteString("Hello world!")
 			return NewJobResult(buff, nil)
 		})
-		d.AddJob(j)
+		d.addJob(j)
 
-		result := j.WaitResult()
+		result := j.Wait()
 
 		str := result.Out.(*bytes.Buffer).String()
 		require.Equal(t, "Hello world!Hello world!", str)

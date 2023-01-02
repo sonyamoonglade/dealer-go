@@ -1,12 +1,16 @@
+// package dealer helps to work with worker pool or semaphores
+// it provides a lot of functionality and manageable workflow
+
 package dealer
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 )
 
-//Default Strategy is Semaphore
+// Strategy Default is Semaphore
 type Strategy int
 
 const (
@@ -14,20 +18,22 @@ const (
 	WorkerPool
 )
 
-var started bool
-
 type Dealer struct {
-	sem        chan struct{}
-	shutdown   chan interface{}
-	jobq       chan *Job
-	logger     *zap.SugaredLogger
-	wg         *sync.WaitGroup
-	strategy   Strategy
+	sem      chan struct{}
+	shutdown chan interface{}
+	jobq     chan *Job
+	logger   *zap.SugaredLogger
+	wg       *sync.WaitGroup
+	strategy Strategy
+	// 0 - stopped
+	// 1 - started
+	started    int32
 	maxWorkers int
 }
 
 func New(logger *zap.SugaredLogger, maxWorkers int) *Dealer {
 	return &Dealer{
+		started:    0,
 		logger:     logger,
 		maxWorkers: maxWorkers,
 		sem:        make(chan struct{}, maxWorkers),
@@ -43,7 +49,7 @@ func (d *Dealer) WithStrategy(strategy Strategy) {
 }
 
 func (d *Dealer) Start(debug bool) {
-	started = true
+	atomic.StoreInt32(&d.started, 1)
 	switch d.strategy {
 	case Semaphore:
 		go d.startWithSemaphore()
@@ -52,11 +58,10 @@ func (d *Dealer) Start(debug bool) {
 		go d.startWorkerPool()
 		d.logger.Debugf("dealing has started with workerPool")
 	}
-
 }
 
 func (d *Dealer) Stop() {
-	started = false
+	atomic.StoreInt32(&d.started, 0)
 	//If worker pool is selected, should close jobq first, to stop all workers
 	switch d.strategy {
 	case Semaphore:
@@ -70,12 +75,16 @@ func (d *Dealer) Stop() {
 	}
 }
 
-//Adds job to job queue
-func (d *Dealer) AddJob(j *Job) {
-	if !started {
+func (d *Dealer) Run(f JobFunc) *Job {
+	j := newJob(f)
+	d.addJob(j)
+	return j
+}
+
+func (d *Dealer) addJob(j *Job) {
+	if atomic.LoadInt32(&d.started) == 0 {
 		panic("dealer has not started yet!")
 	}
-
 	d.jobq <- j
 }
 
@@ -87,9 +96,9 @@ func (d *Dealer) startWorkerPool() {
 }
 
 func (d *Dealer) startWorker(n int) {
-	d.logger.Debugf("worker %d is up\n", n)
 	for j := range d.jobq {
-		j.resultch <- j.F()
+		j.resultch <- j.f()
+		close(j.resultch)
 	}
 	defer d.wg.Done()
 }
@@ -99,8 +108,8 @@ func (d *Dealer) startWithSemaphore() {
 		d.acquire()
 		d.wg.Add(1)
 		go func(j *Job) {
-			j.resultch <- j.F()
-			d.logger.Debugf("job %d is complete", j.ID)
+			j.resultch <- j.f()
+			close(j.resultch)
 			defer func() {
 				d.wg.Done()
 				d.release()

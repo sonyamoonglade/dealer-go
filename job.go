@@ -1,15 +1,11 @@
 package dealer
 
-import (
-	"time"
-)
-
 type JobResult struct {
-	Out interface{}
+	Out any
 	Err error
 }
 
-func NewJobResult(out interface{}, err error) *JobResult {
+func NewJobResult(out any, err error) *JobResult {
 	return &JobResult{
 		Out: out,
 		Err: err,
@@ -19,19 +15,17 @@ func NewJobResult(out interface{}, err error) *JobResult {
 type JobFunc func() *JobResult
 
 type Job struct {
-	ID       int64
-	F        JobFunc
+	f        JobFunc
 	resultch chan *JobResult
 }
 
-func NewJob(f JobFunc) *Job {
-	return &Job{
-		ID:       time.Now().UnixNano(),
-		F:        f,
-		resultch: make(chan *JobResult),
-	}
+func (j *Job) Wait() *JobResult {
+	return <-j.resultch
 }
 
-func (j *Job) WaitResult() *JobResult {
-	return <-j.resultch
+func newJob(f JobFunc) *Job {
+	return &Job{
+		f:        f,
+		resultch: make(chan *JobResult),
+	}
 }
